@@ -35,7 +35,7 @@ class CompleteOSUtility:
         }
         
         # Path to PowerShell backend
-        self.ps_script = os.path.expanduser("~/kali-smartops.ps1")
+        self.ps_script = os.path.expanduser("~/complete_os.ps1")
         
         if not os.path.exists(self.ps_script):
             messagebox.showerror("Error", f"PowerShell script not found!\n\n{self.ps_script}")
@@ -48,6 +48,17 @@ class CompleteOSUtility:
         self.clipboard_action = None
         self.current_process = None
         self.search_content = tk.BooleanVar(value=False)
+        
+        # Bootable drive variables
+        self.usb_devices = []
+        self.usb_drive = tk.StringVar()
+        self.usb_drive_info = tk.StringVar()
+        self.iso_path = tk.StringVar()
+        
+        # Storage format variables
+        self.format_device = tk.StringVar()
+        self.fs_type = tk.StringVar(value="ext4")
+        self.volume_label = tk.StringVar()
         
         self.create_main_layout()
         self.start_system_monitors()
@@ -78,7 +89,7 @@ class CompleteOSUtility:
         self.notebook.pack(fill='both', expand=True, padx=5, pady=5)
         
         # Create all tabs
-        self.create_file_manager_tab()      # RESTORED full UI
+        self.create_file_manager_tab()
         self.create_process_tab()
         self.create_network_tab()
         self.create_security_tab()
@@ -88,8 +99,8 @@ class CompleteOSUtility:
         self.create_cleanup_tab()
         self.create_hardware_tab()
         self.create_realtime_tab()
-        self.create_bootable_drive_tab()    # FIXED
-        self.create_storage_format_tab()    # FIXED
+        self.create_bootable_drive_tab()    # COMPACT VERSION
+        self.create_storage_format_tab()    # COMPACT VERSION
         
         self.create_status_bar()
         
@@ -282,7 +293,7 @@ class CompleteOSUtility:
         parent.needle = needle
         parent.display = display
         
-    # ============ RESTORED FULL FILE MANAGER UI ============
+    # ============ FILE MANAGER TAB ============
     def create_file_manager_tab(self):
         tab = tk.Frame(self.notebook, bg=self.colors['bg'])
         self.notebook.add(tab, text="📁 FILE MANAGER")
@@ -584,113 +595,178 @@ class CompleteOSUtility:
         
         threading.Thread(target=search, daemon=True).start()
         
-    # ============ FIXED BOOTABLE DRIVE TAB ============
+    # ============ COMPACT BOOTABLE DRIVE TAB ============
     def create_bootable_drive_tab(self):
         tab = tk.Frame(self.notebook, bg=self.colors['bg'])
         self.notebook.add(tab, text="💿 BOOTABLE DRIVE")
         
-        # Warning banner
-        warning_frame = tk.Frame(tab, bg=self.colors['warning'])
-        warning_frame.pack(fill='x', padx=20, pady=10)
+        # Warning banner (smaller)
+        warning_frame = tk.Frame(tab, bg=self.colors['warning'], height=25)
+        warning_frame.pack(fill='x', padx=20, pady=5)
+        warning_frame.pack_propagate(False)
         tk.Label(warning_frame, text="⚠️ WARNING: This will DESTROY ALL DATA on the selected drive! ⚠️",
-                font=('Courier', 10, 'bold'), bg=self.colors['warning'], fg='#000000').pack(pady=5)
+                font=('Courier', 9, 'bold'), bg=self.colors['warning'], fg='#000000').pack(pady=3)
         
-        card = self.create_feature_card(tab, "Create Bootable USB Drive", 
-                                         "Write ISO image to USB drive - Make sure you select the CORRECT drive!")
-        output = self.create_output_area(card, expand=True)
+        card = self.create_compact_card(tab, "Create Bootable USB Drive", 
+                                         "Write ISO image to USB drive")
+        output = self.create_compact_output_area(card, height=8)
         
-        # USB drive selection
-        tk.Label(card, text="Select USB Device:", bg=self.colors['card'], fg=self.colors['text']).pack(anchor='w', padx=15)
-        self.usb_drive = tk.StringVar()
-        usb_menu = ttk.Combobox(card, textvariable=self.usb_drive, width=50)
-        usb_menu.pack(pady=5, padx=15)
+        # Two-column layout for compactness
+        top_frame = tk.Frame(card, bg=self.colors['card'])
+        top_frame.pack(fill='x', padx=10, pady=5)
+        
+        # Left column - USB Device
+        left_frame = tk.Frame(top_frame, bg=self.colors['card'])
+        left_frame.pack(side='left', fill='both', expand=True, padx=5)
+        
+        tk.Label(left_frame, text="USB Device:", bg=self.colors['card'], fg=self.colors['text'],
+                font=('Courier', 9)).pack(anchor='w')
+        
+        usb_menu = ttk.Combobox(left_frame, textvariable=self.usb_drive, width=35)
+        usb_menu.pack(pady=2, fill='x')
+        
+        # Device info label (smaller)
+        device_info_label = tk.Label(left_frame, textvariable=self.usb_drive_info, 
+                                      bg=self.colors['card'], fg=self.colors['text_dim'],
+                                      font=('Courier', 7))
+        device_info_label.pack(anchor='w')
+        
+        # Right column - ISO File
+        right_frame = tk.Frame(top_frame, bg=self.colors['card'])
+        right_frame.pack(side='right', fill='both', expand=True, padx=5)
+        
+        tk.Label(right_frame, text="ISO File:", bg=self.colors['card'], fg=self.colors['text'],
+                font=('Courier', 9)).pack(anchor='w')
+        
+        iso_entry = tk.Entry(right_frame, textvariable=self.iso_path, width=35,
+                             bg=self.colors['grid'], fg=self.colors['text'])
+        iso_entry.pack(pady=2, fill='x')
+        
+        # Button row
+        btn_frame = tk.Frame(card, bg=self.colors['card'])
+        btn_frame.pack(fill='x', padx=10, pady=5)
         
         def refresh_usb_drives():
             output.delete(1.0, tk.END)
             output.insert(tk.END, "🔍 Detecting USB drives...\n", 'info')
             
             def execute():
-                result = subprocess.run(['lsblk', '-d', '-o', 'NAME,SIZE,MODEL', '-n'], 
+                result = subprocess.run(['lsblk', '-d', '-o', 'NAME,SIZE,MODEL,TRAN', '-n'], 
                                        capture_output=True, text=True)
                 drives = []
+                self.usb_devices = []
+                
                 for line in result.stdout.split('\n'):
                     if line.strip():
-                        parts = line.split(None, 2)
+                        parts = line.split(None, 3)
                         if len(parts) >= 2:
                             name = parts[0]
                             size = parts[1]
                             model = parts[2] if len(parts) > 2 else "USB Drive"
-                            # Skip main system drive (usually sda)
-                            if name != 'sda' and name != 'nvme0n1':
-                                drives.append(f"/dev/{name} ({size}) - {model}")
-                                output.insert(tk.END, f"  💾 /dev/{name} - {size} - {model}\n", 'info')
+                            transport = parts[3] if len(parts) > 3 else ""
+                            
+                            is_usb = transport == 'usb' or name.startswith('sd')
+                            
+                            if name != 'sda' and name != 'nvme0n1' and is_usb:
+                                display_text = f"/dev/{name} - {size}"
+                                drives.append(display_text)
+                                self.usb_devices.append({'device': f"/dev/{name}", 'size': size, 'model': model})
+                                output.insert(tk.END, f"  💾 {display_text}\n", 'info')
                 
                 usb_menu['values'] = drives
+                if drives and not self.usb_drive.get():
+                    self.usb_drive.set(drives[0])
+                    self.usb_drive_info.set(f"{self.usb_devices[0]['device']} ({self.usb_devices[0]['size']})")
+                
                 if not drives:
-                    output.insert(tk.END, "⚠️ No USB drives found. Insert a USB drive and click Refresh.\n", 'warning')
+                    output.insert(tk.END, "⚠️ No USB drives found\n", 'warning')
                 else:
                     output.insert(tk.END, f"\n✅ Found {len(drives)} drive(s)\n", 'success')
             
             threading.Thread(target=execute, daemon=True).start()
         
-        refresh_btn = tk.Button(card, text="🔄 Refresh Drives", command=refresh_usb_drives,
-                                bg=self.colors['secondary'], fg='#000000')
-        refresh_btn.pack(pady=5)
+        def on_device_select(event):
+            selection = self.usb_drive.get()
+            for drive in self.usb_devices:
+                if selection.startswith(drive['device']):
+                    self.usb_drive_info.set(f"{drive['device']} ({drive['size']})")
+                    break
         
-        # Manual device entry
-        tk.Label(card, text="Or enter device path manually (e.g., /dev/sdb):", 
-                bg=self.colors['card'], fg=self.colors['text']).pack(anchor='w', padx=15)
-        device_entry = tk.Entry(card, textvariable=self.usb_drive, width=50,
-                                bg=self.colors['grid'], fg=self.colors['text'])
-        device_entry.pack(pady=5, padx=15)
+        usb_menu.bind('<<ComboboxSelected>>', on_device_select)
         
-        # ISO file selection
-        tk.Label(card, text="Select ISO File:", bg=self.colors['card'], fg=self.colors['text']).pack(anchor='w', padx=15)
-        self.iso_path = tk.StringVar()
-        iso_entry = tk.Entry(card, textvariable=self.iso_path, width=50,
-                             bg=self.colors['grid'], fg=self.colors['text'])
-        iso_entry.pack(pady=5, padx=15)
+        refresh_btn = tk.Button(btn_frame, text="🔄 Refresh", command=refresh_usb_drives,
+                                bg=self.colors['secondary'], fg='#000000', font=('Courier', 8))
+        refresh_btn.pack(side='left', padx=2)
         
-        def browse_iso():
-            filename = filedialog.askopenfilename(filetypes=[("ISO files", "*.iso"), ("All files", "*.*")])
-            if filename:
-                self.iso_path.set(filename)
-                output.insert(tk.END, f"📀 Selected ISO: {filename}\n", 'info')
+        browse_btn = tk.Button(btn_frame, text="📁 Browse", command=self.browse_iso_file,
+                               bg=self.colors['secondary'], fg='#000000', font=('Courier', 8))
+        browse_btn.pack(side='left', padx=2)
         
-        browse_btn = tk.Button(card, text="📁 Browse ISO", command=browse_iso,
-                               bg=self.colors['secondary'], fg='#000000')
-        browse_btn.pack(pady=5)
+        def auto_detect_iso():
+            output.insert(tk.END, "🔍 Searching for ISO files...\n", 'info')
+            
+            def execute():
+                iso_found = []
+                search_paths = ['~/Downloads', '~/Desktop', '~/']
+                
+                for search_path in search_paths:
+                    expanded_path = os.path.expanduser(search_path)
+                    if os.path.exists(expanded_path):
+                        try:
+                            for file in os.listdir(expanded_path):
+                                if file.lower().endswith('.iso') and os.path.isfile(os.path.join(expanded_path, file)):
+                                    full_path = os.path.join(expanded_path, file)
+                                    size_mb = os.path.getsize(full_path) / (1024 * 1024)
+                                    iso_found.append(full_path)
+                                    output.insert(tk.END, f"  💿 Found: {file} ({size_mb:.0f} MB)\n", 'info')
+                        except:
+                            pass
+                
+                if iso_found and not self.iso_path.get():
+                    iso_found.sort(key=lambda x: os.path.getsize(x), reverse=True)
+                    self.iso_path.set(iso_found[0])
+                    output.insert(tk.END, f"\n✅ Auto-selected: {os.path.basename(iso_found[0])}\n", 'success')
+                elif not iso_found:
+                    output.insert(tk.END, "ℹ️ No ISO files found\n", 'info')
+            
+            threading.Thread(target=execute, daemon=True).start()
         
+        auto_iso_btn = tk.Button(btn_frame, text="🔍 Auto ISO", command=auto_detect_iso,
+                                  bg=self.colors['accent'], fg='#000000', font=('Courier', 8))
+        auto_iso_btn.pack(side='left', padx=2)
+        
+        # Create button
         def create_bootable():
             device = self.usb_drive.get().split()[0] if ' ' in self.usb_drive.get() else self.usb_drive.get()
             iso = self.iso_path.get()
             
-            if not device:
-                output.insert(tk.END, "❌ Please select or enter a USB device\n", 'error')
-                return
-            if not iso:
-                output.insert(tk.END, "❌ Please select an ISO file\n", 'error')
+            if not device or not iso:
+                output.insert(tk.END, "❌ Please select device and ISO\n", 'error')
                 return
             
+            if not os.path.exists(device) or not os.path.exists(iso):
+                output.insert(tk.END, "❌ Device or ISO not found\n", 'error')
+                return
+            
+            device_size = subprocess.run(f'lsblk -d -o SIZE -n {device} 2>/dev/null | head -1', 
+                                         shell=True, capture_output=True, text=True).stdout.strip()
+            iso_size_mb = os.path.getsize(iso) / (1024 * 1024)
+            
             if messagebox.askyesno("⚠️ DESTRUCTIVE OPERATION ⚠️", 
-                                   f"This will COMPLETELY WIPE all data on {device}!\n\n"
-                                   f"Are you ABSOLUTELY sure you want to continue?"):
+                                   f"Device: {device} ({device_size})\nISO: {os.path.basename(iso)} ({iso_size_mb:.0f} MB)\n\n"
+                                   f"This will COMPLETELY WIPE all data on {device}!\n\nContinue?"):
                 output.delete(1.0, tk.END)
                 output.insert(tk.END, f"📀 Creating bootable drive on {device}...\n", 'info')
-                output.insert(tk.END, "⚠️ This may take several minutes. Do not remove the USB drive!\n", 'warning')
+                output.insert(tk.END, "⚠️ This may take several minutes\n", 'warning')
                 
                 def execute():
                     try:
-                        # Unmount any mounted partitions
                         subprocess.run(f'sudo umount {device}* 2>/dev/null', shell=True)
-                        
-                        # Write ISO to USB
                         cmd = f'sudo dd if="{iso}" of={device} bs=4M status=progress conv=fsync'
                         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                         
                         if result.returncode == 0:
                             output.insert(tk.END, "\n✅ Bootable USB created successfully!\n", 'success')
-                            output.insert(tk.END, f"💿 {device} is now bootable\n", 'info')
                         else:
                             output.insert(tk.END, f"\n❌ Error: {result.stderr}\n", 'error')
                     except Exception as e:
@@ -700,39 +776,67 @@ class CompleteOSUtility:
         
         create_btn = tk.Button(card, text="💿 CREATE BOOTABLE DRIVE", command=create_bootable,
                                bg=self.colors['warning'], fg='#000000',
-                               font=('Courier', 11, 'bold'), padx=20, pady=10)
-        create_btn.pack(pady=15)
-        
-        # Instructions
-        info_frame = tk.Frame(card, bg=self.colors['grid'], relief='ridge', bd=1)
-        info_frame.pack(fill='x', padx=15, pady=10)
-        tk.Label(info_frame, text="📖 Instructions:", font=('Courier', 9, 'bold'),
-                bg=self.colors['grid'], fg=self.colors['primary']).pack(anchor='w', padx=10, pady=5)
-        tk.Label(info_frame, text="1. Insert your USB drive\n2. Click 'Refresh Drives' to detect it\n3. Select the correct USB drive\n4. Browse and select your ISO file\n5. Click 'Create Bootable Drive'\n6. Wait for completion (may take 5-10 minutes)",
-                bg=self.colors['grid'], fg=self.colors['text'], font=('Courier', 8), justify='left').pack(anchor='w', padx=10, pady=5)
+                               font=('Courier', 10, 'bold'), padx=10, pady=5)
+        create_btn.pack(pady=5)
         
         refresh_usb_drives()
         
-    # ============ FIXED STORAGE FORMAT TAB ============
+    # ============ COMPACT STORAGE FORMAT TAB ============
     def create_storage_format_tab(self):
         tab = tk.Frame(self.notebook, bg=self.colors['bg'])
         self.notebook.add(tab, text="💾 STORAGE FORMAT")
         
-        # Warning banner
-        warning_frame = tk.Frame(tab, bg=self.colors['warning'])
-        warning_frame.pack(fill='x', padx=20, pady=10)
+        # Warning banner (smaller)
+        warning_frame = tk.Frame(tab, bg=self.colors['warning'], height=25)
+        warning_frame.pack(fill='x', padx=20, pady=5)
+        warning_frame.pack_propagate(False)
         tk.Label(warning_frame, text="⚠️ WARNING: Formatting will DESTROY ALL DATA on the selected device! ⚠️",
-                font=('Courier', 10, 'bold'), bg=self.colors['warning'], fg='#000000').pack(pady=5)
+                font=('Courier', 9, 'bold'), bg=self.colors['warning'], fg='#000000').pack(pady=3)
         
-        card = self.create_feature_card(tab, "Format Storage Device", 
-                                         "Format USB drive or partition to a filesystem")
-        output = self.create_output_area(card, expand=True)
+        card = self.create_compact_card(tab, "Format Storage Device", 
+                                         "Format USB drive or partition")
+        output = self.create_compact_output_area(card, height=8)
         
-        # Device selection
-        tk.Label(card, text="Select Device to Format:", bg=self.colors['card'], fg=self.colors['text']).pack(anchor='w', padx=15)
-        self.format_device = tk.StringVar()
-        device_menu = ttk.Combobox(card, textvariable=self.format_device, width=50)
-        device_menu.pack(pady=5, padx=15)
+        # Two-column layout
+        top_frame = tk.Frame(card, bg=self.colors['card'])
+        top_frame.pack(fill='x', padx=10, pady=5)
+        
+        # Left column - Device
+        left_frame = tk.Frame(top_frame, bg=self.colors['card'])
+        left_frame.pack(side='left', fill='both', expand=True, padx=5)
+        
+        tk.Label(left_frame, text="Device:", bg=self.colors['card'], fg=self.colors['text'],
+                font=('Courier', 9)).pack(anchor='w')
+        
+        device_menu = ttk.Combobox(left_frame, textvariable=self.format_device, width=35)
+        device_menu.pack(pady=2, fill='x')
+        
+        self.format_device_info = tk.StringVar()
+        device_info_label = tk.Label(left_frame, textvariable=self.format_device_info, 
+                                      bg=self.colors['card'], fg=self.colors['text_dim'],
+                                      font=('Courier', 7))
+        device_info_label.pack(anchor='w')
+        
+        # Right column - Filesystem
+        right_frame = tk.Frame(top_frame, bg=self.colors['card'])
+        right_frame.pack(side='right', fill='both', expand=True, padx=5)
+        
+        tk.Label(right_frame, text="Filesystem:", bg=self.colors['card'], fg=self.colors['text'],
+                font=('Courier', 9)).pack(anchor='w')
+        
+        fs_menu = ttk.Combobox(right_frame, textvariable=self.fs_type, 
+                               values=['ext4', 'ntfs', 'fat32', 'exfat'], width=20)
+        fs_menu.pack(pady=2, anchor='w')
+        
+        tk.Label(right_frame, text="Label (optional):", bg=self.colors['card'], fg=self.colors['text'],
+                font=('Courier', 8)).pack(anchor='w')
+        label_entry = tk.Entry(right_frame, textvariable=self.volume_label, width=20,
+                               bg=self.colors['grid'], fg=self.colors['text'])
+        label_entry.pack(pady=2, anchor='w')
+        
+        # Button row
+        btn_frame = tk.Frame(card, bg=self.colors['card'])
+        btn_frame.pack(fill='x', padx=10, pady=5)
         
         def refresh_devices():
             output.delete(1.0, tk.END)
@@ -742,6 +846,8 @@ class CompleteOSUtility:
                 result = subprocess.run(['lsblk', '-o', 'NAME,SIZE,TYPE,MOUNTPOINT', '-n'], 
                                        capture_output=True, text=True)
                 devices = []
+                self.storage_devices = []
+                
                 for line in result.stdout.split('\n'):
                     if line.strip() and ('disk' in line or 'part' in line):
                         parts = line.split()
@@ -750,12 +856,13 @@ class CompleteOSUtility:
                             size = parts[1]
                             dtype = parts[2] if len(parts) > 2 else 'disk'
                             mount = parts[3] if len(parts) > 3 and parts[3] else ''
-                            mount_info = f" (mounted at {mount})" if mount else ""
+                            mount_info = f" (mounted)" if mount else ""
                             
-                            # Show all devices except main system drive
                             if name != 'sda' and name != 'nvme0n1':
-                                devices.append(f"/dev/{name} ({size}) - {dtype}{mount_info}")
-                                output.insert(tk.END, f"  💾 /dev/{name} - {size} - {dtype}{mount_info}\n", 'info')
+                                display_text = f"/dev/{name} ({size}) - {dtype}{mount_info}"
+                                devices.append(display_text)
+                                self.storage_devices.append({'device': f"/dev/{name}", 'size': size, 'type': dtype, 'mount': mount})
+                                output.insert(tk.END, f"  💾 {display_text}\n", 'info')
                 
                 device_menu['values'] = devices
                 if not devices:
@@ -765,27 +872,19 @@ class CompleteOSUtility:
             
             threading.Thread(target=execute, daemon=True).start()
         
-        refresh_btn = tk.Button(card, text="🔄 Refresh Devices", command=refresh_devices,
-                                bg=self.colors['secondary'], fg='#000000')
-        refresh_btn.pack(pady=5)
+        def on_device_select_format(event):
+            selection = self.format_device.get()
+            for device in getattr(self, 'storage_devices', []):
+                if selection.startswith(device['device']):
+                    mount_info = f" - MOUNTED" if device['mount'] else ""
+                    self.format_device_info.set(f"{device['device']} ({device['size']}) - {device['type']}{mount_info}")
+                    break
         
-        # Manual device entry
-        tk.Label(card, text="Or enter device path manually (e.g., /dev/sdb1):", 
-                bg=self.colors['card'], fg=self.colors['text']).pack(anchor='w', padx=15)
-        device_entry = tk.Entry(card, textvariable=self.format_device, width=50,
-                                bg=self.colors['grid'], fg=self.colors['text'])
-        device_entry.pack(pady=5, padx=15)
+        device_menu.bind('<<ComboboxSelected>>', on_device_select_format)
         
-        # Filesystem selection
-        tk.Label(card, text="Filesystem Type:", bg=self.colors['card'], fg=self.colors['text']).pack(anchor='w', padx=15)
-        self.fs_type = ttk.Combobox(card, values=['ext4', 'ntfs', 'fat32', 'exfat'], width=20)
-        self.fs_type.set('ext4')
-        self.fs_type.pack(pady=5, padx=15)
-        
-        # Label
-        tk.Label(card, text="Volume Label (optional):", bg=self.colors['card'], fg=self.colors['text']).pack(anchor='w', padx=15)
-        self.volume_label = tk.Entry(card, width=30, bg=self.colors['grid'], fg=self.colors['text'])
-        self.volume_label.pack(pady=5, padx=15)
+        refresh_btn = tk.Button(btn_frame, text="🔄 Refresh", command=refresh_devices,
+                                bg=self.colors['secondary'], fg='#000000', font=('Courier', 8))
+        refresh_btn.pack(side='left', padx=2)
         
         def format_device():
             device = self.format_device.get().split()[0] if ' ' in self.format_device.get() else self.format_device.get()
@@ -793,10 +892,9 @@ class CompleteOSUtility:
             label = self.volume_label.get()
             
             if not device:
-                output.insert(tk.END, "❌ Please select or enter a device\n", 'error')
+                output.insert(tk.END, "❌ Please select a device\n", 'error')
                 return
             
-            # Check if device exists
             if not os.path.exists(device):
                 output.insert(tk.END, f"❌ Device {device} does not exist!\n", 'error')
                 return
@@ -804,17 +902,14 @@ class CompleteOSUtility:
             # Check if mounted
             result = subprocess.run(f'mount | grep {device}', shell=True, capture_output=True, text=True)
             if result.stdout:
-                output.insert(tk.END, f"⚠️ {device} is currently mounted. Please unmount it first.\n", 'warning')
-                output.insert(tk.END, f"Run: sudo umount {device}\n", 'info')
+                output.insert(tk.END, f"⚠️ {device} is mounted. Please unmount first.\n", 'warning')
                 return
             
             if messagebox.askyesno("⚠️ DESTRUCTIVE OPERATION ⚠️", 
-                                   f"This will COMPLETELY ERASE all data on {device}!\n\n"
-                                   f"Format as {fs}?\n\nAre you ABSOLUTELY sure?"):
+                                   f"Device: {device}\n\nThis will COMPLETELY ERASE all data!\n\n"
+                                   f"Format as {fs}?\n\nContinue?"):
                 output.delete(1.0, tk.END)
                 output.insert(tk.END, f"💾 Formatting {device} as {fs}...\n", 'info')
-                if label:
-                    output.insert(tk.END, f"🏷️  Setting volume label: {label}\n", 'info')
                 
                 def execute():
                     try:
@@ -842,7 +937,7 @@ class CompleteOSUtility:
                         if result.returncode == 0:
                             output.insert(tk.END, f"\n✅ Device formatted successfully as {fs}!\n", 'success')
                             if label:
-                                output.insert(tk.END, f"🏷️  Volume label set to: {label}\n", 'success')
+                                output.insert(tk.END, f"🏷️ Label: {label}\n", 'success')
                         else:
                             output.insert(tk.END, f"\n❌ Error: {result.stderr}\n", 'error')
                     except Exception as e:
@@ -850,20 +945,58 @@ class CompleteOSUtility:
                 
                 threading.Thread(target=execute, daemon=True).start()
         
-        format_btn = tk.Button(card, text="💾 FORMAT DEVICE", command=format_device,
+        format_btn = tk.Button(btn_frame, text="💾 FORMAT", command=format_device,
                                bg=self.colors['warning'], fg='#000000',
-                               font=('Courier', 11, 'bold'), padx=20, pady=10)
-        format_btn.pack(pady=15)
-        
-        # Filesystem info
-        info_frame = tk.Frame(card, bg=self.colors['grid'], relief='ridge', bd=1)
-        info_frame.pack(fill='x', padx=15, pady=10)
-        tk.Label(info_frame, text="📖 Filesystem Information:", font=('Courier', 9, 'bold'),
-                bg=self.colors['grid'], fg=self.colors['primary']).pack(anchor='w', padx=10, pady=5)
-        tk.Label(info_frame, text="ext4 - Default Linux filesystem (recommended for Linux)\nntfs - Windows filesystem (for compatibility with Windows)\nfat32 - Universal but limited to 4GB file size\nexfat - Modern filesystem for USB drives (large file support)",
-                bg=self.colors['grid'], fg=self.colors['text'], font=('Courier', 8), justify='left').pack(anchor='w', padx=10, pady=5)
+                               font=('Courier', 10, 'bold'))
+        format_btn.pack(side='left', padx=2)
         
         refresh_devices()
+        
+    def create_compact_card(self, parent, title, description):
+        """Create a compact feature card"""
+        card = tk.Frame(parent, bg=self.colors['card'], relief='ridge', bd=1)
+        card.pack(fill='x', padx=20, pady=5)
+        
+        if title:
+            tk.Label(card, text=title, font=('Courier', 10, 'bold'),
+                    bg=self.colors['card'], fg=self.colors['primary']).pack(anchor='w', padx=10, pady=(5,0))
+        if description:
+            tk.Label(card, text=description, font=('Courier', 7),
+                    bg=self.colors['card'], fg=self.colors['text_dim']).pack(anchor='w', padx=10)
+        return card
+    
+    def create_compact_output_area(self, parent, height=6):
+        """Create a compact output area"""
+        output_frame = tk.Frame(parent, bg=self.colors['grid'])
+        output_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        output_text = tk.Text(output_frame, wrap=tk.WORD, font=('Consolas', 8),
+                               bg=self.colors['grid'], fg=self.colors['text'],
+                               relief='flat', height=height)
+        scrollbar = tk.Scrollbar(output_frame, orient='vertical', command=output_text.yview)
+        output_text.configure(yscrollcommand=scrollbar.set)
+        output_text.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        
+        output_text.tag_config('info', foreground=self.colors['secondary'])
+        output_text.tag_config('success', foreground=self.colors['primary'])
+        output_text.tag_config('warning', foreground=self.colors['warning'])
+        output_text.tag_config('error', foreground=self.colors['warning'])
+        output_text.tag_config('header', foreground=self.colors['accent'])
+        
+        return output_text
+        
+    def browse_iso_file(self):
+        """Browse for ISO file"""
+        filename = filedialog.askopenfilename(
+            title="Select ISO File",
+            filetypes=[("ISO files", "*.iso"), ("All files", "*.*")]
+        )
+        if filename:
+            self.iso_path.set(filename)
+            size_mb = os.path.getsize(filename) / (1024 * 1024)
+            if hasattr(self, 'output_text'):
+                self.output_text.insert(tk.END, f"📀 Selected: {os.path.basename(filename)} ({size_mb:.0f} MB)\n", 'info')
         
     # ============ OTHER FEATURE TABS ============
     def create_process_tab(self):

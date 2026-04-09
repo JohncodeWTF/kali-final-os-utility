@@ -400,7 +400,7 @@ function Show-HardwareInfo {
 }
 
 # ============================================
-# NEW: FILE MANAGER FUNCTIONS (Features 13-19)
+# FILE MANAGER FUNCTIONS (Features 13-19)
 # ============================================
 
 function Get-FileList {
@@ -545,7 +545,7 @@ function Search-FilesPS {
 }
 
 # ============================================
-# NEW: BOOTABLE DRIVE FUNCTIONS (Features 20-21)
+# FIXED: BOOTABLE DRIVE FUNCTIONS (Features 20-21) - LINUX COMPATIBLE
 # ============================================
 
 function Get-USBDrives {
@@ -554,17 +554,31 @@ function Get-USBDrives {
     Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
     Write-Host ""
     
-    $drives = Get-Disk | Where-Object { $_.BusType -eq "USB" -or $_.Size -lt 64GB }
-    if ($drives) {
-        foreach ($drive in $drives) {
-            $size = [math]::Round($drive.Size / 1GB, 2)
-            $friendlyName = if ($drive.FriendlyName) { $drive.FriendlyName } else { "USB Drive" }
-            Write-Host "💾 Disk $($drive.Number): $friendlyName - ${size}GB" -ForegroundColor Green
-            Write-Host "   Device: /dev/sd$(($drive.Number + 97) -as [char])" -ForegroundColor White
+    # Use Linux lsblk command instead of Windows Get-Disk
+    $usbInfo = & lsblk -d -o NAME,SIZE,MODEL,TYPE -n 2>$null
+    
+    $found = $false
+    foreach ($line in $usbInfo) {
+        if ($line -match "disk") {
+            $parts = $line -split '\s+', 3
+            if ($parts.Count -ge 2) {
+                $name = $parts[0]
+                $size = $parts[1]
+                $model = if ($parts.Count -ge 3) { $parts[2] } else { "USB Drive" }
+                
+                # Skip main system drive (usually sda)
+                if ($name -ne "sda" -and $name -ne "nvme0n1") {
+                    Write-Host "💾 /dev/$name - ${size} - $model" -ForegroundColor Green
+                    $found = $true
+                }
+            }
         }
-    } else {
+    }
+    
+    if (-not $found) {
         Write-Host "⚠️ No USB drives detected" -ForegroundColor Yellow
         Write-Host "   Make sure a USB drive is connected" -ForegroundColor White
+        Write-Host "   Tip: Run 'lsblk' to see all drives" -ForegroundColor White
     }
 }
 
@@ -580,6 +594,7 @@ function Create-BootableDrive {
     # Confirm device exists
     if (-not (Test-Path $Device)) {
         Write-Host "❌ Error: Device $Device does not exist!" -ForegroundColor Red
+        Write-Host "   Tip: Run 'lsblk' to see available devices" -ForegroundColor Yellow
         return
     }
     
@@ -590,20 +605,24 @@ function Create-BootableDrive {
     }
     
     try {
-        # Unmount any mounted partitions
+        # Unmount any mounted partitions using Linux commands
         Write-Host "🔌 Unmounting any mounted partitions..." -ForegroundColor Yellow
-        $deviceBase = $Device -replace '[0-9]+$', ''
-        sudo umount ${deviceBase}* 2>$null
+        sudo umount ${Device}* 2>/dev/null
         
-        # Write ISO to device
+        # Write ISO to device using direct dd command
         Write-Host "💿 Writing ISO to device (this may take several minutes)..." -ForegroundColor Yellow
-        $process = Start-Process -NoNewWindow -Wait -PassThru -FilePath "sudo" -ArgumentList "dd if=`"$IsoPath`" of=`"$Device`" bs=4M status=progress"
+        Write-Host "   This will show progress updates..." -ForegroundColor Cyan
         
-        if ($process.ExitCode -eq 0) {
+        # Use dd directly with sudo
+        $result = & sudo dd if="$IsoPath" of="$Device" bs=4M status=progress conv=fsync 2>&1
+        
+        if ($LASTEXITCODE -eq 0) {
             Write-Host "`n✅ Bootable USB created successfully!" -ForegroundColor Green
             Write-Host "💿 Device $Device is now bootable" -ForegroundColor Green
+            Write-Host "   You can now use this USB drive to boot from" -ForegroundColor White
         } else {
             Write-Host "`n❌ Error creating bootable drive" -ForegroundColor Red
+            Write-Host "   Error: $result" -ForegroundColor Red
         }
     } catch {
         Write-Host "❌ Error: $_" -ForegroundColor Red
@@ -611,7 +630,7 @@ function Create-BootableDrive {
 }
 
 # ============================================
-# NEW: STORAGE FORMAT FUNCTIONS (Features 22-23)
+# FIXED: STORAGE FORMAT FUNCTIONS (Features 22-23) - LINUX COMPATIBLE
 # ============================================
 
 function Get-StorageDevices {
@@ -620,22 +639,33 @@ function Get-StorageDevices {
     Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
     Write-Host ""
     
-    $disks = Get-Disk
-    foreach ($disk in $disks) {
-        $size = [math]::Round($disk.Size / 1GB, 2)
-        $type = if ($disk.BusType -eq "USB") { "USB Drive" } else { "Internal Drive" }
-        $devicePath = "/dev/sd$(($disk.Number + 97) -as [char])"
-        
-        Write-Host "💾 Disk $($disk.Number): $($disk.FriendlyName)" -ForegroundColor Green
-        Write-Host "   Size: ${size}GB | Type: $type | Device: $devicePath" -ForegroundColor White
-        
-        $partitions = Get-Partition -DiskNumber $disk.Number -ErrorAction SilentlyContinue
-        foreach ($part in $partitions) {
-            $partSize = [math]::Round($part.Size / 1GB, 2)
-            $driveLetter = if ($part.DriveLetter) { "$($part.DriveLetter):" } else { "No letter" }
-            Write-Host "   └─ Partition $($part.PartitionNumber): $driveLetter - ${partSize}GB" -ForegroundColor Gray
+    # Use Linux lsblk command instead of Windows Get-Disk
+    $disks = & lsblk -o NAME,SIZE,TYPE,MODEL -n 2>$null
+    
+    foreach ($line in $disks) {
+        if ($line -match "disk") {
+            $parts = $line -split '\s+', 4
+            if ($parts.Count -ge 2) {
+                $name = $parts[0]
+                $size = $parts[1]
+                $model = if ($parts.Count -ge 4) { $parts[3] } else { "Unknown" }
+                
+                Write-Host "💾 /dev/$name - ${size} - $model" -ForegroundColor Green
+                
+                # Show partitions for this disk using lsblk
+                $partitions = & lsblk -o NAME,SIZE,TYPE,MOUNTPOINT -n "/dev/$name" 2>$null | Where-Object { $_ -match "part" }
+                foreach ($part in $partitions) {
+                    $partParts = $part -split '\s+', 4
+                    if ($partParts.Count -ge 2) {
+                        $partName = $partParts[0]
+                        $partSize = $partParts[1]
+                        $mountPoint = if ($partParts.Count -ge 4 -and $partParts[3]) { " (mounted at $($partParts[3]))" } else { "" }
+                        Write-Host "   └─ /dev/$partName - ${partSize}$mountPoint" -ForegroundColor Gray
+                    }
+                }
+                Write-Host ""
+            }
         }
-        Write-Host ""
     }
 }
 
@@ -652,43 +682,49 @@ function Format-Storage {
     # Check if device exists
     if (-not (Test-Path $Device)) {
         Write-Host "❌ Error: Device $Device does not exist!" -ForegroundColor Red
+        Write-Host "   Tip: Run 'lsblk' to see available devices" -ForegroundColor Yellow
         return
     }
     
+    # Check if device is a partition (has number) or full disk
+    $isPartition = $Device -match '[0-9]+$'
+    
     try {
-        # Unmount if mounted
+        # Unmount if mounted (Linux command)
         Write-Host "🔌 Unmounting device if mounted..." -ForegroundColor Yellow
-        sudo umount $Device 2>$null
+        sudo umount $Device 2>/dev/null
         
-        # Format based on filesystem type
+        # Format based on filesystem type using Linux mkfs commands
         Write-Host "💾 Formatting as $Filesystem..." -ForegroundColor Yellow
+        
+        $formatCmd = ""
         switch ($Filesystem) {
             "ext4" {
                 if ($Label) {
-                    sudo mkfs.ext4 -F -L $Label $Device
+                    $formatCmd = "sudo mkfs.ext4 -F -L `"$Label`" $Device"
                 } else {
-                    sudo mkfs.ext4 -F $Device
+                    $formatCmd = "sudo mkfs.ext4 -F $Device"
                 }
             }
             "ntfs" {
                 if ($Label) {
-                    sudo mkfs.ntfs -F -L $Label $Device
+                    $formatCmd = "sudo mkfs.ntfs -F -L `"$Label`" $Device"
                 } else {
-                    sudo mkfs.ntfs -F $Device
+                    $formatCmd = "sudo mkfs.ntfs -F $Device"
                 }
             }
             "fat32" {
                 if ($Label) {
-                    sudo mkfs.fat -F 32 -n $Label $Device
+                    $formatCmd = "sudo mkfs.fat -F 32 -n `"$Label`" $Device"
                 } else {
-                    sudo mkfs.fat -F 32 $Device
+                    $formatCmd = "sudo mkfs.fat -F 32 $Device"
                 }
             }
             "exfat" {
                 if ($Label) {
-                    sudo mkfs.exfat -n $Label $Device
+                    $formatCmd = "sudo mkfs.exfat -n `"$Label`" $Device"
                 } else {
-                    sudo mkfs.exfat $Device
+                    $formatCmd = "sudo mkfs.exfat $Device"
                 }
             }
             default {
@@ -696,9 +732,17 @@ function Format-Storage {
                 return
             }
         }
-        Write-Host "✅ Device formatted successfully as $Filesystem!" -ForegroundColor Green
-        if ($Label) {
-            Write-Host "🏷️  Volume label set to: $Label" -ForegroundColor Green
+        
+        # Execute the format command
+        Invoke-Expression $formatCmd
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Device formatted successfully as $Filesystem!" -ForegroundColor Green
+            if ($Label) {
+                Write-Host "🏷️  Volume label set to: $Label" -ForegroundColor Green
+            }
+        } else {
+            Write-Host "❌ Format failed with exit code: $LASTEXITCODE" -ForegroundColor Red
         }
     } catch {
         Write-Host "❌ Error: $_" -ForegroundColor Red
@@ -726,7 +770,7 @@ if ($Feature -gt 0) {
         11 { Show-PackageUpdates }
         12 { Show-HardwareInfo }
         
-        # NEW: File Manager features (13-19)
+        # File Manager features (13-19)
         13 { Get-FileList -Directory $Path }
         14 { Copy-ItemPS -Source $Source -Destination $Destination }
         15 { Move-ItemPS -Source $Source -Destination $Destination }
@@ -735,11 +779,11 @@ if ($Feature -gt 0) {
         18 { New-FolderPS -Path $Path }
         19 { Search-FilesPS -Directory $Path -Pattern $Destination -SearchContent:$SearchContent }
         
-        # NEW: Bootable Drive features (20-21)
+        # Bootable Drive features (20-21)
         20 { Get-USBDrives }
         21 { Create-BootableDrive -Device $Device -IsoPath $IsoPath }
         
-        # NEW: Storage Format features (22-23)
+        # Storage Format features (22-23)
         22 { Get-StorageDevices }
         23 { Format-Storage -Device $Device -Filesystem $Filesystem -Label $Label }
         
